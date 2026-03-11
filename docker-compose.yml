@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+
+  px4:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.px4
+    container_name: px4_sitl
+    environment:
+      - DISPLAY=:0
+      - WAYLAND_DISPLAY=$WAYLAND_DISPLAY
+      - XDG_RUNTIME_DIR=/tmp
+      - GAZEBO_IP=0.0.0.0
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+    network_mode: host
+    privileged: true
+
+  dds:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dds
+    container_name: dds_agent
+    network_mode: host
+    depends_on:
+      - px4
+
+  ros2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ros2
+    container_name: ros2_agent
+    network_mode: host
+    depends_on:
+      - dds
+    restart: on-failure
+    command: bash /scripts/start.sh
