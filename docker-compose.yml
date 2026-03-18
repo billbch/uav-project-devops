@@ -57,6 +57,8 @@ services:
       dockerfile: docker/Dockerfile.ros2
     container_name: ros2_agent
     network_mode: host
+    env_file:
+      - .env
     depends_on:
       - dds_0
       - dds_1

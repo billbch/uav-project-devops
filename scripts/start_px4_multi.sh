@@ -25,7 +25,7 @@ GZ_SIM_RESOURCE_PATH=/px4/Tools/simulation/gz/models \
 ./build/px4_sitl_default/bin/px4 \
 ./build/px4_sitl_default/etc -s etc/init.d-posix/rcS -i 1 &
 
-sleep 10
+sleep 35
 
 echo "=== Lanzando UAV 2 ==="
 PX4_SYS_AUTOSTART=4001 \
@@ -43,7 +43,7 @@ GZ_SIM_RESOURCE_PATH=/px4/Tools/simulation/gz/models \
 echo "=== 3 drones lanzados ==="
 
 echo "=== Esperando a que PX4 inicialice... ==="
-sleep 80
+sleep 120
 
 echo "=== Aplicando parametros a todos los UAVs ==="
 for i in 0 1 2; do

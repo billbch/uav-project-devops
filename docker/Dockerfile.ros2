@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     ros-jazzy-desktop \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip3 install anthropic groq --break-system-packages    
 # px4_msgs
 RUN git clone https://github.com/PX4/px4_msgs.git /ros2_ws/src/px4_msgs
 
