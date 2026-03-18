@@ -1,16 +1,11 @@
 FROM ubuntu:22.04
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PX4_HOME_LAT=47.397971
 ENV PX4_HOME_LON=8.546164
 ENV PX4_HOME_ALT=0.0
 
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    wget \
-    sudo \
-    lsb-release \
+    git curl wget sudo lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/PX4/PX4-Autopilot.git --recursive /px4
@@ -18,9 +13,16 @@ RUN git clone https://github.com/PX4/PX4-Autopilot.git --recursive /px4
 WORKDIR /px4
 RUN bash ./Tools/setup/ubuntu.sh --no-nuttx
 
-# Parámetros para no necesitar GCS
-RUN echo "param set COM_RCL_EXCEPT 4" >> /px4/startup_params.txt
-RUN echo "param set NAV_DLL_ACT 0" >> /px4/startup_params.txt
-RUN echo "param set COM_RC_IN_MODE 1" >> /px4/startup_params.txt
+RUN make px4_sitl_default
 
-CMD ["bash", "-c", "make px4_sitl gz_x500"]
+# Agregar params directamente al script de inicio de Gazebo
+RUN echo "" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
+    echo "param set COM_RCL_EXCEPT 7" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
+    echo "param set NAV_DLL_ACT 0" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
+    echo "param set COM_RC_IN_MODE 1" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
+    echo "param set GCS_CONN_LOST_ACT 0" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim
+
+COPY scripts/start_px4_multi.sh /scripts/start_px4_multi.sh
+RUN chmod +x /scripts/start_px4_multi.sh
+
+CMD ["bash", "/scripts/start_px4_multi.sh"]

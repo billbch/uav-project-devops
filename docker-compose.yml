@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-
   px4:
     build:
       context: .
@@ -17,15 +16,40 @@ services:
       - /mnt/wslg:/mnt/wslg
     network_mode: host
     privileged: true
+    command: bash /scripts/start_px4_multi.sh
 
-  dds:
+  dds_0:
     build:
       context: .
       dockerfile: docker/Dockerfile.dds
-    container_name: dds_agent
+    container_name: dds_agent_0
     network_mode: host
     depends_on:
       - px4
+    restart: on-failure
+    command: MicroXRCEAgent udp4 -p 8888
+
+  dds_1:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dds
+    container_name: dds_agent_1
+    network_mode: host
+    depends_on:
+      - px4
+    restart: on-failure
+    command: MicroXRCEAgent udp4 -p 8889
+
+  dds_2:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dds
+    container_name: dds_agent_2
+    network_mode: host
+    depends_on:
+      - px4
+    restart: on-failure
+    command: MicroXRCEAgent udp4 -p 8890
 
   ros2:
     build:
@@ -34,6 +58,8 @@ services:
     container_name: ros2_agent
     network_mode: host
     depends_on:
-      - dds
+      - dds_0
+      - dds_1
+      - dds_2
     restart: on-failure
     command: bash /scripts/start.sh
