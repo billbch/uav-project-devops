@@ -84,7 +84,7 @@ def execute_formation(posiciones: list):
             super().__init__('formation_node')
             qos = QoSProfile(
                 reliability=ReliabilityPolicy.BEST_EFFORT,
-                durability=DurabilityPolicy.VOLATILE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
                 history=HistoryPolicy.KEEP_LAST,
                 depth=1
             )
@@ -125,15 +125,15 @@ def execute_formation(posiciones: list):
                 msg.timestamp = ts
                 self.traj_pubs[i].publish(msg)
 
-            # Armar y activar offboard
-            if self.counter == 20:
+            # Retry offboard + arm every 30 ticks so PX4 accepts them whenever ready
+            if self.counter >= 20 and self.counter % 30 == 20:
                 for i, sid in enumerate(self.system_ids):
                     self._send_cmd(i, sid, VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
                 self.get_logger().info('Offboard activado 🚁')
 
-            if self.counter == 30:
+            if self.counter >= 25 and self.counter % 30 == 25:
                 for i, sid in enumerate(self.system_ids):
-                    self._send_cmd(i, sid, VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0)
+                    self._send_cmd(i, sid, VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0, 21196.0)
                 self.get_logger().info('Armando 🔥')
 
             self.counter += 1
