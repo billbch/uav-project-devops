@@ -12,15 +12,12 @@ RUN git clone https://github.com/PX4/PX4-Autopilot.git --recursive /px4
 
 WORKDIR /px4
 RUN bash ./Tools/setup/ubuntu.sh --no-nuttx
-
 RUN make px4_sitl_default
 
-# Agregar params directamente al script de inicio de Gazebo
-RUN echo "" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
-    echo "param set COM_RCL_EXCEPT 7" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
-    echo "param set NAV_DLL_ACT 0" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
-    echo "param set COM_RC_IN_MODE 1" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim && \
-    echo "param set GCS_CONN_LOST_ACT 0" >> /px4/ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim
+# Params para TODAS las instancias (se aplican al arrancar)
+RUN echo "param set COM_RCL_EXCEPT 7" >> /px4/ROMFS/px4fmu_common/init.d-posix/rcS && \
+    echo "param set NAV_DLL_ACT 0" >> /px4/ROMFS/px4fmu_common/init.d-posix/rcS && \
+    echo "param set COM_RC_IN_MODE 1" >> /px4/ROMFS/px4fmu_common/init.d-posix/rcS
 
 COPY scripts/start_px4_multi.sh /scripts/start_px4_multi.sh
 RUN chmod +x /scripts/start_px4_multi.sh

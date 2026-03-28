@@ -63,5 +63,4 @@ services:
       - dds_0
       - dds_1
       - dds_2
-    restart: on-failure
     command: bash /scripts/start.sh
