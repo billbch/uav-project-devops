@@ -22,17 +22,27 @@ class UAV:
 
     def send_offboard_mode(self, node):
         msg = OffboardControlMode()
+        msg.timestamp = int(node.get_clock().now().nanoseconds / 1000)
         msg.position = True
         msg.velocity = False
         msg.acceleration = False
-        msg.timestamp = int(node.get_clock().now().nanoseconds / 1000)
+        msg.attitude = False
+        msg.body_rate = False
+        if hasattr(msg, "actuator"):
+            msg.actuator = False
         self.offboard_pub.publish(msg)
 
     def send_trajectory(self, node, x, y, z):
+        nan = float("nan")
+        ts = int(node.get_clock().now().nanoseconds / 1000)
         msg = TrajectorySetpoint()
-        msg.position = [x, y, z]
+        msg.timestamp = ts
+        msg.position = [float(x), float(y), float(z)]
+        msg.velocity = [nan, nan, nan]
+        msg.acceleration = [nan, nan, nan]
+        msg.jerk = [nan, nan, nan]
         msg.yaw = 0.0
-        msg.timestamp = int(node.get_clock().now().nanoseconds / 1000)
+        msg.yawspeed = nan
         self.trajectory_pub.publish(msg)
 
     def arm(self, node):
@@ -66,9 +76,9 @@ class MultiUAVNode(Node):
         ]
 
         self.positions = [
-            (0.0, 0.0, -5.0),
-            (2.0, 0.0, -5.0),
-            (4.0, 0.0, -5.0),
+            (0.0, 0.0, -6.0),
+            (2.0, 0.0, -6.0),
+            (4.0, 0.0, -6.0),
         ]
 
         self.counter = 0

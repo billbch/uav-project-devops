@@ -19,6 +19,10 @@ RUN echo "param set COM_RCL_EXCEPT 7" >> /px4/ROMFS/px4fmu_common/init.d-posix/r
     echo "param set NAV_DLL_ACT 0" >> /px4/ROMFS/px4fmu_common/init.d-posix/rcS && \
     echo "param set COM_RC_IN_MODE 1" >> /px4/ROMFS/px4fmu_common/init.d-posix/rcS
 
+# Inject obstacle into PX4's stock default world so x500 spawn + gz bridge still work.
+COPY docker/inject_obstacle_into_default_world.py /tmp/inject_obstacle_into_default_world.py
+RUN python3 /tmp/inject_obstacle_into_default_world.py && rm -f /tmp/inject_obstacle_into_default_world.py
+
 COPY scripts/start_px4_multi.sh /scripts/start_px4_multi.sh
 RUN chmod +x /scripts/start_px4_multi.sh
 

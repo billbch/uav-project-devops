@@ -6,7 +6,10 @@ export PX4_GZ_WORLD=default
 cd /px4
 
 echo "=== Lanzando UAV 0 con make (inicia Gazebo) ==="
+# One MicroXRCEAgent per drone (docker-compose: 8888 / 8889 / 8890). Same port on multiple
+# instances = only one gets a clean ROS2 session; the others look "stuck" at ~origin in odom.
 PX4_GZ_MODEL_POSE="0,0,0,0,0,0" \
+PX4_MICRODDS_UDP_PORT=8888 \
 make px4_sitl gz_x500 &
 
 echo "=== Esperando que Gazebo arranque ==="
@@ -16,7 +19,7 @@ echo "=== Lanzando UAV 1 ==="
 PX4_SYS_AUTOSTART=4001 \
 PX4_GZ_MODEL=x500 \
 PX4_GZ_MODEL_POSE="2,0,0,0,0,0" \
-PX4_MICRODDS_UDP_PORT=8888 \
+PX4_MICRODDS_UDP_PORT=8889 \
 PX4_GZ_MODELS=/px4/Tools/simulation/gz/models \
 PX4_GZ_WORLDS=/px4/Tools/simulation/gz/worlds \
 PX4_GZ_WORLD=default \
@@ -31,7 +34,7 @@ echo "=== Lanzando UAV 2 ==="
 PX4_SYS_AUTOSTART=4001 \
 PX4_GZ_MODEL=x500 \
 PX4_GZ_MODEL_POSE="4,0,0,0,0,0" \
-PX4_MICRODDS_UDP_PORT=8888 \
+PX4_MICRODDS_UDP_PORT=8890 \
 PX4_GZ_MODELS=/px4/Tools/simulation/gz/models \
 PX4_GZ_WORLDS=/px4/Tools/simulation/gz/worlds \
 PX4_GZ_WORLD=default \
