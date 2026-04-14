@@ -5,3 +5,11 @@ build/
 install/
 log/
 .env
+
+# Local artifacts (recordings, extracted frames, exported telemetry)
+frames/
+frames2/
+frames*/
+*.png
+*.mp4
+uav_pose_*.csv
