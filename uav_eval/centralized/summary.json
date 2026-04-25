@@ -1,0 +1,20 @@
+{
+  "corridor_violation": false,
+  "failure_reasons": [],
+  "formation_error_avg_m": 0.04719941631154635,
+  "formation_error_max_m": 0.12337960724932862,
+  "goal_reached": true,
+  "mission_success": true,
+  "mission_time_sec": 8.019638999999998,
+  "mode": "centralized",
+  "motion_samples": 38,
+  "oscillation_detected": false,
+  "samples": 38,
+  "scenario": "corridor",
+  "stale_odometry": false,
+  "thresholds": {
+    "goal_tolerance_m": 2.5,
+    "max_formation_error_m": 2.0,
+    "stale_timeout_sec": 2.0
+  }
+}

@@ -67,13 +67,68 @@ python3 /scripts/llm_agent.py
 
 **3 — Demo**
 
-- Menu **5** → **s** — line formation, **(4,0,-6) → (40,0,-6)** through the gap (no LLM).  
+- Menu **5** → **s** — line formation, **(4,0,+6) → (40,0,+6)** through the gap (no LLM).  
 - Or **6** → **s** — triangle + same path.
 
 **4 — Logs sanity check**
 
 - `[UAV_POSE] … odom_alliance_xyz`: **L / F1 / F2** should all move in **x** together (F1 ≈ L+2, F2 ≈ L+4 in **alliance** frame).  
 - If **F2** stays near **(0,0,…)** forever, the **px4** image is still wrong (rebuild **px4**) or DDS agents are not up.
+
+### Centralized vs decentralized corridor evaluation
+
+This project treats the corridor as a **known-map simulation**: the obstacle geometry is fixed in Gazebo, and controllers use PX4 odometry plus fixed coordination rules. It does not add SLAM or camera/LiDAR perception.
+
+The comparison keeps the same Gazebo/PX4/ROS2 stack and changes only the controller mode:
+
+- `centralized`: the existing `FormationNode` acts as one global planner / central formation controller and computes all UAV setpoints.
+- `decentralized`: three local controllers run independently; UAV0 follows the corridor route, UAV1 follows UAV0 with a fixed local rule, and UAV2 follows UAV1 with the same fixed local rule.
+
+Rebuild and start the stack:
+
+```bash
+docker compose down
+docker compose build px4 ros2
+docker compose up -d --force-recreate px4 dds_0 dds_1 dds_2 ros2
+```
+
+After PX4 and DDS are ready, run the centralized trial:
+
+```bash
+docker exec -it ros2_agent bash
+source /opt/ros/jazzy/setup.bash
+source /ros2_ws/install/setup.bash
+python3 /scripts/experiment_runner.py \
+  --mode centralized \
+  --scenario corridor \
+  --log-dir /tmp/uav_eval/centralized \
+  --no-llm
+```
+
+Reset the simulation or restart the stack so the next trial starts from the same initial conditions, then run:
+
+```bash
+python3 /scripts/experiment_runner.py \
+  --mode decentralized \
+  --scenario corridor \
+  --log-dir /tmp/uav_eval/decentralized \
+  --no-llm
+```
+
+Copy results back to the host:
+
+```bash
+docker cp ros2_agent:/tmp/uav_eval ./uav_eval
+```
+
+Each trial writes:
+
+```text
+uav_eval/<mode>/pose.csv
+uav_eval/<mode>/summary.json
+```
+
+The `summary.json` file reports `mission_success`, `mission_time_sec`, `formation_error_avg_m`, `formation_error_max_m`, threshold values, and failure reasons. A run passes only when the leader reaches the final corridor waypoint, all UAVs stay inside the corridor-safe region, odometry remains valid, and max formation error stays under the configured threshold (`2.0 m` by default).
 
 ### Free SSD: Docker + WSL (quick)
 

@@ -17,6 +17,10 @@ def _dist(a: Vec3, b: Vec3) -> float:
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
+def distance(a: Vec3, b: Vec3) -> float:
+    return _dist(a, b)
+
+
 def validate_plan(plan: FormationPlan, *, min_separation_m: float = 0.9) -> None:
     if not plan.leader_waypoints:
         raise ValueError("leader_waypoints must be non-empty")
@@ -91,4 +95,24 @@ def follower_targets_from_offsets(leader_target: Vec3, follower_offsets: Sequenc
         (leader_target[0] + off[0], leader_target[1] + off[1], leader_target[2] + off[2])
         for off in follower_offsets
     ]
+
+
+def formation_errors(
+    leader_position: Vec3,
+    follower_positions: Sequence[Vec3],
+    follower_offsets: Sequence[Vec3],
+) -> List[float]:
+    if len(follower_positions) != len(follower_offsets):
+        raise ValueError("follower_positions and follower_offsets must have the same length")
+    expected = follower_targets_from_offsets(leader_position, follower_offsets)
+    return [_dist(actual, desired) for actual, desired in zip(follower_positions, expected)]
+
+
+def leader_reached_goal(
+    leader_position: Optional[Vec3],
+    goal: Vec3,
+    *,
+    tolerance_m: float,
+) -> bool:
+    return leader_position is not None and _dist(leader_position, goal) <= tolerance_m
 
