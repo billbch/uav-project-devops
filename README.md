@@ -1,103 +1,94 @@
-## Agentic Multi-UAV Coordination (PX4 SITL + ROS2 + LLM)
+## Agentic Multi-UAV Coordination
 
-This repo runs a 3-UAV PX4 SITL + Gazebo simulation in Docker, and provides a ROS2 (Jazzy) Python agent that:
+This project simulates **three UAVs** in a known corridor scenario and compares two coordination architectures:
 
-- asks an LLM (Groq) for a **leader route** (waypoints)
-- asks an LLM for **formation offsets** (followers relative to leader)
-- publishes offboard setpoints so the **whole formation moves** while maintaining offsets
+- **Centralized control:** one ROS2 controller computes the mission route and formation setpoints for all UAVs.
+- **Decentralized baseline:** each UAV runs a local controller and computes its own setpoint from fixed coordination rules.
 
-### Requirements
+The goal is to evaluate both approaches under the same **Gazebo/PX4/ROS2/Docker** setup using:
 
-- Docker / Docker Compose
-- WSLg working (for Gazebo UI on Windows)
-- A Groq API key
+- Mission success
+- Mission time
+- Average formation error
+- Maximum formation error
 
-### Setup
+The final comparison shows that both approaches complete the corridor mission, while the centralized controller is faster and more accurate.
 
-Create a `.env` file in the repo root:
+## Technology Roles
+
+| Technology | Role |
+|---|---|
+| Docker Compose | Starts the complete reproducible stack. |
+| Gazebo | Simulates the 3D world, UAV models, and corridor environment. |
+| PX4 SITL | Runs one simulated flight controller per UAV. |
+| Micro XRCE-DDS Agent | Bridges each PX4 instance to ROS2 topics. |
+| ROS2 Jazzy | Runs the Python control and evaluation nodes. |
+| `px4_msgs` | Provides ROS2 message types for PX4 offboard control. |
+| Python | Implements centralized control, decentralized control, metrics, and experiment runner. |
+| Groq / LLM | Optional interactive mission/formation generation in `llm_agent.py`; not used in the reproducible corridor comparison. |
+
+## Main Components
+
+| Path | Purpose |
+|---|---|
+| `src/llm_agent.py` | Centralized controller and optional interactive LLM demo. |
+| `src/decentralized_agent.py` | Per-UAV local controllers for the decentralized baseline. |
+| `src/experiment_runner.py` | Headless runner for centralized/decentralized corridor trials. |
+| `src/metrics.py` | Shared pass/fail and metric computation. |
+| `src/scenario.py` | Shared corridor, spawn, frame, and threshold constants. |
+| `src/formation_flight.py` | Formation helpers, waypoint progress, and formation-error math. |
+| `docker/inject_obstacle_into_default_world.py` | Injects corridor buildings into PX4's default Gazebo world. |
+| `scripts/start_px4_multi.sh` | Starts the three PX4 SITL UAVs. |
+| `uav_eval_analysis.ipynb` | Executed notebook with result tables and plots. |
+
+## Scenario
+
+The experiment is a **known-map corridor** task:
+
+- Three UAVs start in line formation.
+- The leader flies through a corridor along positive `x`.
+- Followers maintain fixed offsets relative to the leader.
+- Buildings are injected into Gazebo as two rows of obstacles with a gap around `y=0`.
+- Planning and evaluation use Gazebo ENU coordinates: `x` East, `y` North, `z` Up.
+- Cruise altitude is `z=+6 m`.
+
+This project does **not** add SLAM or real camera/LiDAR perception. It focuses on coordination/control architecture under a fixed simulated environment.
+
+## Reproduce The Evaluation
+
+Run commands from the repo root in WSL:
 
 ```bash
-GROQ_API_KEY=your_key_here
+cd ~/uav-project-devops
 ```
 
-`.env` is ignored by git (see `.gitignore`).
-
-### Run
-
-Start the stack:
+### Terminal 1: Clean Start
 
 ```bash
-docker compose up --build
+rm -rf ./uav_eval ./uav_eval_centralized ./uav_eval_decentralized ./uav_eval_failed
+docker compose down --remove-orphans
+docker container prune -f
+docker builder prune -f
 ```
 
-In another terminal, open the ROS2 container:
+### Terminal 1: Build And Start
+
+Rebuild `ros2` whenever Python files change, then start the full stack:
 
 ```bash
-docker exec -it ros2_agent bash
-```
-
-Inside the container:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /ros2_ws/install/setup.bash
-python3 /scripts/llm_agent.py
-```
-
-### Tonight: one-shot repro (buildings + 3 drones + corridor)
-
-Do this from the **repo root** in **WSL** (e.g. `cd ~/uav-project-devops`). Images bake in **world injection**, **DDS ports 8888/8889/8890** per drone (`scripts/start_px4_multi.sh`), and the **ROS2 agent** (`src/` → `/scripts/`). Old containers keep old behavior until you **down + build + recreate**.
-
-**1 — Stack (wait ~3 minutes after `up` for `start_px4_multi.sh` sleeps)**
-
-```bash
-docker compose down
-docker compose build px4 ros2
+docker compose build ros2
 docker compose up -d --force-recreate px4 dds_0 dds_1 dds_2 ros2
 ```
 
-**2 — Agent**
+Wait about 3 minutes for PX4/Gazebo/DDS startup.
+
+### Terminal 2: Centralized Trial
 
 ```bash
 docker exec -it ros2_agent bash
 source /opt/ros/jazzy/setup.bash
 source /ros2_ws/install/setup.bash
-python3 /scripts/llm_agent.py
-```
-
-**3 — Demo**
-
-- Menu **5** → **s** — line formation, **(4,0,+6) → (40,0,+6)** through the gap (no LLM).  
-- Or **6** → **s** — triangle + same path.
-
-**4 — Logs sanity check**
-
-- `[UAV_POSE] … odom_alliance_xyz`: **L / F1 / F2** should all move in **x** together (F1 ≈ L+2, F2 ≈ L+4 in **alliance** frame).  
-- If **F2** stays near **(0,0,…)** forever, the **px4** image is still wrong (rebuild **px4**) or DDS agents are not up.
-
-### Centralized vs decentralized corridor evaluation
-
-This project treats the corridor as a **known-map simulation**: the obstacle geometry is fixed in Gazebo, and controllers use PX4 odometry plus fixed coordination rules. It does not add SLAM or camera/LiDAR perception.
-
-The comparison keeps the same Gazebo/PX4/ROS2 stack and changes only the controller mode:
-
-- `centralized`: the existing `FormationNode` acts as one global planner / central formation controller and computes all UAV setpoints.
-- `decentralized`: three local controllers run independently; UAV0 follows the corridor route, UAV1 follows UAV0 with a fixed local rule, and UAV2 follows UAV1 with the same fixed local rule.
-
-Rebuild and start the stack:
-
-```bash
-docker compose down
-docker compose build px4 ros2
-docker compose up -d --force-recreate px4 dds_0 dds_1 dds_2 ros2
-```
-
-After PX4 and DDS are ready, run the centralized trial:
-
-```bash
-docker exec -it ros2_agent bash
-source /opt/ros/jazzy/setup.bash
-source /ros2_ws/install/setup.bash
+rm -rf /tmp/uav_eval
 python3 /scripts/experiment_runner.py \
   --mode centralized \
   --scenario corridor \
@@ -105,9 +96,39 @@ python3 /scripts/experiment_runner.py \
   --no-llm
 ```
 
-Reset the simulation or restart the stack so the next trial starts from the same initial conditions, then run:
+Expected:
+
+```text
+Wrote /tmp/uav_eval/centralized/pose.csv
+Wrote /tmp/uav_eval/centralized/summary.json
+mission_success=True
+```
+
+### Terminal 1: Copy Centralized Results
+
+Copy before restarting, because `/tmp` is inside the container:
 
 ```bash
+mkdir -p ./uav_eval
+docker cp ros2_agent:/tmp/uav_eval/centralized ./uav_eval/centralized
+python3 -m json.tool ./uav_eval/centralized/summary.json
+```
+
+### Terminal 1: Restart For Decentralized
+
+```bash
+docker compose down --remove-orphans
+docker compose up -d --force-recreate px4 dds_0 dds_1 dds_2 ros2
+```
+
+Wait about 3 minutes again.
+
+### Terminal 2: Decentralized Trial
+
+```bash
+docker exec -it ros2_agent bash
+source /opt/ros/jazzy/setup.bash
+source /ros2_ws/install/setup.bash
 python3 /scripts/experiment_runner.py \
   --mode decentralized \
   --scenario corridor \
@@ -115,80 +136,138 @@ python3 /scripts/experiment_runner.py \
   --no-llm
 ```
 
-Copy results back to the host:
-
-```bash
-docker cp ros2_agent:/tmp/uav_eval ./uav_eval
-```
-
-Each trial writes:
+Expected:
 
 ```text
-uav_eval/<mode>/pose.csv
-uav_eval/<mode>/summary.json
+Wrote /tmp/uav_eval/decentralized/pose.csv
+Wrote /tmp/uav_eval/decentralized/summary.json
+mission_success=True
 ```
 
-The `summary.json` file reports `mission_success`, `mission_time_sec`, `formation_error_avg_m`, `formation_error_max_m`, threshold values, and failure reasons. A run passes only when the leader reaches the final corridor waypoint, all UAVs stay inside the corridor-safe region, odometry remains valid, and max formation error stays under the configured threshold (`2.0 m` by default).
-
-### Free SSD: Docker + WSL (quick)
-
-**Docker (run in WSL or PowerShell, repo optional):**
+### Terminal 1: Copy Decentralized Results
 
 ```bash
-docker compose down
-docker system prune -af
+docker cp ros2_agent:/tmp/uav_eval/decentralized ./uav_eval/decentralized
+python3 -m json.tool ./uav_eval/decentralized/summary.json
+```
+
+### Terminal 1: Verify Files
+
+```bash
+ls -R ./uav_eval
+```
+
+Expected:
+
+```text
+./uav_eval/centralized/pose.csv
+./uav_eval/centralized/summary.json
+./uav_eval/decentralized/pose.csv
+./uav_eval/decentralized/summary.json
+```
+
+## Results
+
+Final run:
+
+| Controller | Mission success | Mission time | Avg formation error | Max formation error | Failure reasons |
+|---|---:|---:|---:|---:|---|
+| Centralized | True | 8.02 s | 0.047 m | 0.123 m | none |
+| Decentralized | True | 12.08 s | 0.126 m | 0.260 m | none |
+
+Both modes completed the same corridor mission without stale odometry, oscillation, or corridor violations.
+
+![Metric comparison](uav_eval/figures/metric_comparison.png)
+
+Interpretation:
+
+- Centralized control is faster because one controller computes the global mission and all formation setpoints.
+- Decentralized control succeeds, but takes longer and has higher formation error because each UAV acts through local fixed-rule coordination.
+- Both errors are well below the `2 m` success threshold.
+
+## Trajectory And Safety Plots
+
+The XY plot shows all UAVs passing through the corridor gap between the buildings.
+
+![XY paths](uav_eval/figures/xy_paths.png)
+
+The formation-error plot shows both modes staying below the `2 m` threshold in the successful final run.
+
+![Formation error](uav_eval/figures/formation_error.png)
+
+The altitude/lateral-deviation plot shows the UAVs staying near `z=6 m` and near the corridor centerline.
+
+![Altitude and lateral deviation](uav_eval/figures/altitude_lateral.png)
+
+## Notebook Analysis
+
+Open the executed notebook for interactive plots and report-ready figures:
+
+```bash
+uav_eval_analysis.ipynb
+```
+
+It contains:
+
+- Summary table
+- Metric comparison charts
+- XY trajectory plots
+- Formation-error plots
+- Altitude/lateral-deviation plots
+- Final conclusions
+
+## Optional Interactive LLM Demo
+
+The original interactive centralized agent is still available:
+
+```bash
+docker exec -it ros2_agent bash
+source /opt/ros/jazzy/setup.bash
+source /ros2_ws/install/setup.bash
+python3 /scripts/llm_agent.py
+```
+
+Useful menu options:
+
+- `5`: fixed corridor mission without LLM
+- `6`: triangle formation plus corridor mission
+- `1` / `2` / `3`: LLM-assisted formation/mission generation if `GROQ_API_KEY` is configured
+
+Create `.env` only if using the LLM path:
+
+```bash
+GROQ_API_KEY=your_key_here
+```
+
+## Cleanup
+
+After saving results:
+
+```bash
+docker compose down --remove-orphans
+docker container prune -f
+docker builder prune -f
+```
+
+More aggressive cleanup if disk is full:
+
+```bash
+docker system prune -af --volumes
 docker builder prune -af
 ```
 
-`prune -af` removes **all** unused images/containers/networks (not just this project). Drop the `f` if you want to keep unused images.
+On Windows, reclaim WSL/Docker disk space after cleanup:
 
-**WSL virtual disk (Windows — frees space Windows reports for WSL):**
-
-1. Exit shells, then: `wsl --shutdown` (PowerShell or CMD as you).
-2. Optional: **Disk Management** or **Optimize-VHD** on `ext4.vhdx` / `docker-desktop-data` (path varies; common under `%LOCALAPPDATA%\Docker\wsl\` and `\Packages\Canonical...\LocalState\`).
-3. Or: **Docker Desktop → Settings → Resources → Disk image location** / **Clean / Purge data** if you use Desktop’s cleaner.
-
-After heavy pruning, **next run** will **re-download/rebuild** images — that is normal.
-
-### Usage
-
-The agent prompts for:
-
-- `formación>>>` (example: `triangulo`)
-- `misión>>>` (example: `fly a square at 5m altitude starting at x=0 y=0`)
-
-It will print the offsets and waypoint count, ask for confirmation, then start moving the formation.
-
-### Buildings in Gazebo (default world)
-
-PX4 loads the stock `**default`** world. At **Docker build**, `[docker/inject_obstacle_into_default_world.py](docker/inject_obstacle_into_default_world.py)` injects **six** static boxes (`building_obstacle_0` … `_5`) in two rows with a **corridor along +X** at **y≈0** (see script header for dimensions). Rebuild `**px4`** after editing that script, then **restart** the stack (see **Quick reproduce** above).
-
-**Obstacle avoidance in the LLM agent is opt-in (default off).** Add to `.env` to enable:
-
-```bash
-UAV_OBSTACLE_AVOIDANCE=1
+```powershell
+wsl --shutdown
 ```
 
-Optional tuning: `UAV_BUILDING_HALF_XY` (default `3`), `UAV_BUILDING_HALF_Z` (default `6`) — must match the injected box size.
+Then compact Docker's VHDX from an Administrator `diskpart` session if needed.
 
-When enabled, use a mission through **y≈0**, **x** from ~0 to ~45 at **z=+6** (default cruise, ENU-Up) to exercise the virtual rangefinders against those boxes.
+## Project Conclusion
 
-### Multi-UAV: third drone “stuck”, odom near (0,0,0)
+This project completes a reproducible comparison between centralized and decentralized multi-UAV coordination in the same simulated corridor. Both controllers successfully fly the three-UAV formation through the corridor, reach the final waypoint, and remain within the configured safety and formation-error thresholds.
 
-Compose runs **three** Micro XRCE-DDS agents on UDP **8888**, **8889**, **8890**. Each PX4 SITL instance must use the matching port (`PX4_MICRODDS_UDP_PORT`). If two drones share the same port, ROS2 only talks reliably to one of them; the other keeps bogus odometry and ignores offboard. See `[scripts/start_px4_multi.sh](scripts/start_px4_multi.sh)`. After changing it: `**docker compose build px4`** and restart the stack.
+The results show the expected trade-off. The centralized controller performs better in this controlled known-map scenario because one node has global responsibility for the mission and all formation setpoints, producing faster completion and smaller formation error. The decentralized baseline is still successful, but it is slower and less precise because each UAV computes its own movement from local fixed rules.
 
-### Debug: log commanded vs estimated x,y
-
-In `.env`:
-
-```bash
-UAV_LOG_POSE=1
-```
-
-Optional: only while a mission is running (after option 2/3):
-
-```bash
-UAV_LOG_POSE_MISSION_ONLY=1
-```
-
-Prefer **rebuild `ros2` + recreate container** over ad-hoc `docker cp`. Run the agent and watch `[UAV_POSE] cmd_alliance_xyz` vs `odom_alliance_xyz` — both are in **Gazebo ENU** (leader spawn = origin). Raw PX4 setpoints per drone differ because each SITL instance has its **own local NED origin** at its Gazebo pose (`initial_positions` / `start_px4_multi.sh`).
+Overall, the project demonstrates a complete DevOps-style robotics workflow: containerized simulation, repeatable experiments, automated metric collection, pass/fail evaluation, and report-ready plots. The final outputs provide enough evidence to explain, reproduce, and compare both coordination approaches clearly.
