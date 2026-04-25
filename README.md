@@ -177,7 +177,7 @@ Final run:
 
 Both modes completed the same corridor mission without stale odometry, oscillation, or corridor violations.
 
-![Metric comparison](uav_eval/figures/metric_comparison.png)
+![Metric comparison](docs/figures/metric_comparison.png)
 
 Interpretation:
 
@@ -189,15 +189,15 @@ Interpretation:
 
 The XY plot shows all UAVs passing through the corridor gap between the buildings.
 
-![XY paths](uav_eval/figures/xy_paths.png)
+![XY paths](docs/figures/xy_paths.png)
 
 The formation-error plot shows both modes staying below the `2 m` threshold in the successful final run.
 
-![Formation error](uav_eval/figures/formation_error.png)
+![Formation error](docs/figures/formation_error.png)
 
 The altitude/lateral-deviation plot shows the UAVs staying near `z=6 m` and near the corridor centerline.
 
-![Altitude and lateral deviation](uav_eval/figures/altitude_lateral.png)
+![Altitude and lateral deviation](docs/figures/altitude_lateral.png)
 
 ## Notebook Analysis
 
