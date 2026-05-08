@@ -11,5 +11,8 @@ frames/
 frames2/
 frames*/
 *.png
+!docs/
+!docs/figures/
+!docs/figures/*.png
 *.mp4
 uav_pose_*.csv

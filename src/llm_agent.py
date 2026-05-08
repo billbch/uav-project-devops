@@ -33,6 +33,17 @@ import time
 
 from formation_flight import FormationPlan, WaypointProgressor, follower_targets_from_offsets, validate_plan
 from avoidance import AvoidanceController, AvoidanceParams, ObstacleAabb, compute_virtual_ranges
+from scenario import (
+    CORRIDOR_WAYPOINTS,
+    DEFAULT_CRUISE_Z_ENU,
+    LINE_FOLLOWER_OFFSETS,
+    PX4_NAMESPACES,
+    PX4_SYSTEM_IDS,
+    SPAWN_POSITIONS_ENU,
+    TRIANGLE_DEMO_OFFSETS,
+    alliance_to_vehicle_local,
+    vehicle_local_to_alliance,
+)
 
 # PX4 TrajectorySetpoint: NaN on a component means "do not control this state". Leaving velocity/accel as
 # implicit zeros makes the position controller fight zero-velocity constraints while tracking position,
@@ -60,20 +71,9 @@ def _trajectory_position_hold(
 #
 # We keep the *planning / corridor* frame as Gazebo ENU so what you see matches the numbers, and we
 # convert ENU↔NED at the PX4 interface boundary.
-DEFAULT_CRUISE_Z_ENU = 6.0  # meters above ground (Up)
-
 # Must match docker/inject_obstacle_into_default_world.py corridor (six 6×6 m footprints, gap |y|<3 along +X).
 # Leader path: approach from west, traverse the 6 m-wide gap, exit past the eastern pair.
-DEBUG_RAM_BUILDING_WAYPOINTS: List[Tuple[float, float, float]] = [
-    # Gazebo ENU: fly along +X (East) through the corridor at y≈0, z=+6m.
-    (4.0, 0.0, DEFAULT_CRUISE_Z_ENU),
-    (40.0, 0.0, DEFAULT_CRUISE_Z_ENU),
-]
-# ~equilateral triangle, side ~2 m, min separation OK for validate_plan (leader + these offsets).
-TRIANGLE_DEMO_OFFSETS: List[Tuple[float, float, float]] = [
-    (2.0, 0.0, 0.0),
-    (1.0, math.sqrt(3.0), 0.0),
-]
+DEBUG_RAM_BUILDING_WAYPOINTS: List[Tuple[float, float, float]] = list(CORRIDOR_WAYPOINTS)
 
 
 class FormationNode(Node):
@@ -85,8 +85,8 @@ class FormationNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
-        namespaces = ['', '/px4_1', '/px4_2']
-        self.system_ids = [1, 2, 3]
+        namespaces = list(PX4_NAMESPACES)
+        self.system_ids = list(PX4_SYSTEM_IDS)
         self.traj_pubs = []
         self.offboard_pubs = []
         self.cmd_pubs = []
@@ -94,9 +94,7 @@ class FormationNode(Node):
         # (first two numbers per drone). Each SITL instance uses its own local NED origin at spawn; waypoints
         # and formation are planned in this shared "alliance ENU" frame (world corridor frame).
         self.initial_positions = [
-            {'x': 0.0, 'y': 0.0, 'z': DEFAULT_CRUISE_Z_ENU},
-            {'x': 2.0, 'y': 0.0, 'z': DEFAULT_CRUISE_Z_ENU},
-            {'x': 4.0, 'y': 0.0, 'z': DEFAULT_CRUISE_Z_ENU},
+            {'x': p[0], 'y': p[1], 'z': p[2]} for p in SPAWN_POSITIONS_ENU
         ]
 
         for ns in namespaces:
@@ -224,7 +222,7 @@ class FormationNode(Node):
         self._formation_plan: Optional[FormationPlan] = None
         self._progressor: Optional[WaypointProgressor] = None
         # Default formation: line (can be changed interactively)
-        self._default_follower_offsets: List[Tuple[float, float, float]] = [(2.0, 0.0, 0.0), (4.0, 0.0, 0.0)]
+        self._default_follower_offsets: List[Tuple[float, float, float]] = list(LINE_FOLLOWER_OFFSETS)
         self._follower_offsets: List[Tuple[float, float, float]] = list(self._default_follower_offsets)
         # Safe default: hover (no motion) until the user loads a plan
         self._leader_waypoints: List[Tuple[float, float, float]] = [(0.0, 0.0, DEFAULT_CRUISE_Z_ENU)]
@@ -309,12 +307,7 @@ class FormationNode(Node):
         Local PX4 NED: x=North, y=East, z=Down (meters)
         Gazebo ENU:    x=East,  y=North, z=Up   (meters)
         """
-        nx, ey, dz = local_xyz_ned
-        sx, sy = self._spawn_xy(vehicle_index)  # ENU spawn offsets (x=E, y=N)
-        enu_x = ey + sx
-        enu_y = nx + sy
-        enu_z = -dz  # spawn z is 0 in this setup
-        return (enu_x, enu_y, enu_z)
+        return vehicle_local_to_alliance(vehicle_index, local_xyz_ned)
 
     def _alliance_to_vehicle_local(
         self, vehicle_index: int, alliance_xyz_enu: Tuple[float, float, float]
@@ -327,12 +320,7 @@ class FormationNode(Node):
         - y_ned (East)  = x_enu (East)
         - z_ned (Down)  = -z_enu (Up)
         """
-        ex, ny, uz = alliance_xyz_enu
-        sx, sy = self._spawn_xy(vehicle_index)  # ENU spawn offsets (x=E, y=N)
-        x_ned = ny - sy
-        y_ned = ex - sx
-        z_ned = -uz
-        return (x_ned, y_ned, z_ned)
+        return alliance_to_vehicle_local(vehicle_index, alliance_xyz_enu)
 
     def _on_leader_odom(self, msg: VehicleOdometry) -> None:
         try:
@@ -862,9 +850,9 @@ Rules:
 - JSON only.
 - z is ENU Up (z=+6 is 6m AGL; use this for corridor missions so UAVs are mid-height vs 12m buildings).
 - 4 to 12 waypoints.
-- z roughly in [-12,-4].
+- z roughly in [4,12].
 
-Shape: {{"leader_waypoints":[{{"x":0,"y":0,"z":-6}},{{"x":5,"y":0,"z":-6}}]}}"""
+Shape: {{"leader_waypoints":[{{"x":0,"y":0,"z":6}},{{"x":5,"y":0,"z":6}}]}}"""
     raw = _groq_chat_with_retries(system=_JSON_ONLY_SYSTEM, user=user, max_tokens=900, attempts=4)
     payload: Dict[str, Any] = _safe_json_loads(raw)
     wps_raw = payload.get("leader_waypoints") or []
@@ -897,12 +885,12 @@ Formation: {formation_command!r}
 Leader mission: {mission_command!r}
 
 Rules:
-- JSON only; meters; z negative = altitude.
+- JSON only; meters; z is ENU Up (z=+6 is 6m AGL for corridor missions).
 - Follower offsets vs leader; min 0.9m spacing vs (0,0,0) and between followers.
 - 4 to 12 leader waypoints.
 
 Shape:
-{{"formation":{{"name":"str","follower_offsets":[{{"uav":1,"dx":0,"dy":0,"dz":0}},{{"uav":2,"dx":0,"dy":0,"dz":0}}]}},"leader_waypoints":[{{"x":0,"y":0,"z":-6}}]}}"""
+{{"formation":{{"name":"str","follower_offsets":[{{"uav":1,"dx":0,"dy":0,"dz":0}},{{"uav":2,"dx":0,"dy":0,"dz":0}}]}},"leader_waypoints":[{{"x":0,"y":0,"z":6}}]}}"""
 
     raw = _groq_chat_with_retries(system=_JSON_ONLY_SYSTEM, user=user, max_tokens=1100, attempts=4)
     payload: Dict[str, Any] = _safe_json_loads(raw)
