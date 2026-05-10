@@ -13,7 +13,6 @@ from px4_msgs.msg import (
 )
 from std_msgs.msg import Float32MultiArray
 
-from formation_flight import WaypointProgressor
 from scenario import (
     CORRIDOR_WAYPOINTS,
     DEFAULT_CRUISE_Z_ENU,
@@ -61,19 +60,14 @@ class LocalUavController(Node):
         self.namespace = PX4_NAMESPACES[self.uav_id]
         self.system_id = PX4_SYSTEM_IDS[self.uav_id]
         self._own_pos: Optional[Vec3] = None
-        self._leader_pos: Optional[Vec3] = None
-        self._leader_target: Optional[Vec3] = None
         self._last_target: Optional[Vec3] = None
+        self._wp_index = 0
+        self._ready_for_wp = False
+        self._peer_states = {}
         self._px4_ts_us = 0
         self._counter = 0
         self._settle_ticks = 0
         self._mission_started = False
-        self._progressor = WaypointProgressor(
-            CORRIDOR_WAYPOINTS,
-            loop=False,
-            arrival_radius_m=1.2,
-            fallback_ticks_per_waypoint=1_000_000,
-        )
 
         cmd_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -97,8 +91,8 @@ class LocalUavController(Node):
         self.cmd_pub = self.create_publisher(
             VehicleCommand, f"{self.namespace}/fmu/in/vehicle_command", cmd_qos
         )
-        self.reference_pub = self.create_publisher(
-            Float32MultiArray, "/uav_eval/decentralized/leader_reference", 10
+        self.peer_state_pub = self.create_publisher(
+            Float32MultiArray, "/uav_eval/decentralized/peer_state", 10
         )
 
         self.create_subscription(
@@ -114,19 +108,12 @@ class LocalUavController(Node):
             odom_qos,
         )
 
-        if self.uav_id > 0:
-            self.create_subscription(
-                VehicleOdometry,
-                f"{PX4_NAMESPACES[0]}/fmu/out/vehicle_odometry",
-                lambda msg: self._on_odom(0, msg, own=False),
-                odom_qos,
-            )
-            self.create_subscription(
-                Float32MultiArray,
-                "/uav_eval/decentralized/leader_reference",
-                self._on_leader_reference,
-                10,
-            )
+        self.create_subscription(
+            Float32MultiArray,
+            "/uav_eval/decentralized/peer_state",
+            self._on_peer_state,
+            10,
+        )
 
         self.timer = self.create_timer(0.05, self._tick)
         self.get_logger().info(f"Local controller started for UAV{self.uav_id}")
@@ -139,19 +126,23 @@ class LocalUavController(Node):
             return
         if own:
             self._own_pos = pos
-        else:
-            self._leader_pos = pos
-
-    def _on_leader_reference(self, msg: Float32MultiArray) -> None:
-        if len(msg.data) < 3:
-            return
-        self._leader_target = (float(msg.data[0]), float(msg.data[1]), float(msg.data[2]))
 
     def _on_vlp(self, msg: VehicleLocalPosition) -> None:
         t = int(getattr(msg, "timestamp", 0) or 0)
         if t <= 0:
             t = int(getattr(msg, "timestamp_sample", 0) or 0)
         self._px4_ts_us = t
+
+    def _on_peer_state(self, msg: Float32MultiArray) -> None:
+        if len(msg.data) < 3:
+            return
+        peer_id = int(msg.data[0])
+        if peer_id == self.uav_id or peer_id not in (0, 1, 2):
+            return
+        self._peer_states[peer_id] = {
+            "wp_index": int(msg.data[1]),
+            "ready": bool(int(msg.data[2])),
+        }
 
     def _timestamp_us(self) -> int:
         if self._px4_ts_us > 0:
@@ -171,31 +162,48 @@ class LocalUavController(Node):
 
             self._mission_started = True
 
-        if self.uav_id == 0:
-            if self._own_pos is not None:
-                self._progressor.tick(self._own_pos)
-            target = self._progressor.current_target
-            self._publish_leader_reference(target)
-            return self._limit_target_step(target)
-
-        if self._leader_target is None and self._leader_pos is None:
-            return hover
-
-        offset = LINE_FOLLOWER_OFFSETS[self.uav_id - 1]
-        leader_ref = self._leader_target if self._leader_target is not None else self._leader_pos
-        assert leader_ref is not None
-        # Fixed local rule: each follower independently computes its own setpoint from the leader reference.
-        desired = (
-            leader_ref[0] + offset[0],
-            leader_ref[1] + offset[1],
-            leader_ref[2] + offset[2],
-        )
+        self._update_consensus_progress()
+        desired = self._current_assignment()
         return self._limit_target_step(desired)
 
-    def _publish_leader_reference(self, target: Vec3) -> None:
+    def _current_assignment(self) -> Vec3:
+        leader_target = CORRIDOR_WAYPOINTS[self._wp_index]
+        if self.uav_id == 0:
+            return leader_target
+        offset = LINE_FOLLOWER_OFFSETS[self.uav_id - 1]
+        return (
+            leader_target[0] + offset[0],
+            leader_target[1] + offset[1],
+            leader_target[2] + offset[2],
+        )
+
+    def _update_consensus_progress(self) -> None:
+        if self._own_pos is None:
+            self._ready_for_wp = False
+            return
+
+        target = self._current_assignment()
+        dx = self._own_pos[0] - target[0]
+        dy = self._own_pos[1] - target[1]
+        dz = self._own_pos[2] - target[2]
+        self._ready_for_wp = (dx * dx + dy * dy + dz * dz) ** 0.5 <= 1.2
+        if self._wp_index >= len(CORRIDOR_WAYPOINTS) - 1:
+            return
+
+        peers_ready = all(
+            state.get("wp_index", -1) > self._wp_index
+            or (state.get("wp_index") == self._wp_index and state.get("ready"))
+            for state in self._peer_states.values()
+        )
+        heard_every_peer = len(self._peer_states) == 2
+        if heard_every_peer and self._ready_for_wp and peers_ready:
+            self._wp_index += 1
+            self._ready_for_wp = False
+
+    def _publish_peer_state(self) -> None:
         msg = Float32MultiArray()
-        msg.data = [float(target[0]), float(target[1]), float(target[2])]
-        self.reference_pub.publish(msg)
+        msg.data = [float(self.uav_id), float(self._wp_index), float(int(self._ready_for_wp))]
+        self.peer_state_pub.publish(msg)
 
     def _limit_target_step(self, desired: Vec3) -> Vec3:
         if self._last_target is None:
@@ -235,6 +243,7 @@ class LocalUavController(Node):
     def _tick(self) -> None:
         ts = self._timestamp_us()
         target = self._target_alliance()
+        self._publish_peer_state()
 
         offboard = OffboardControlMode()
         offboard.timestamp = ts
