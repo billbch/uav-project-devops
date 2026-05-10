@@ -1,0 +1,24 @@
+{
+  "corridor_violation": true,
+  "failure_reasons": [
+    "leader_did_not_reach_final_waypoint_with_valid_formation",
+    "corridor_or_obstacle_safety_violation",
+    "formation_error_threshold_exceeded"
+  ],
+  "formation_error_avg_m": 1.0062050945714132,
+  "formation_error_max_m": 2.9290934547871657,
+  "goal_reached": false,
+  "mission_success": false,
+  "mission_time_sec": null,
+  "mode": "decentralized",
+  "motion_samples": 98,
+  "oscillation_detected": false,
+  "samples": 98,
+  "scenario": "corridor",
+  "stale_odometry": false,
+  "thresholds": {
+    "goal_tolerance_m": 2.5,
+    "max_formation_error_m": 2.0,
+    "stale_timeout_sec": 2.0
+  }
+}
