@@ -3,7 +3,7 @@
 This project simulates **three UAVs** in a known corridor scenario and compares two coordination architectures:
 
 - **Centralized control:** one ROS2 controller computes the mission route and formation setpoints for all UAVs.
-- **Decentralized baseline:** each UAV runs a local controller and computes its own setpoint from fixed coordination rules.
+- **Decentralized consensus baseline:** each UAV runs a local controller, computes its own formation target from the shared waypoint plan, and advances waypoints using peer readiness messages.
 
 The goal is to evaluate both approaches under the same **Gazebo/PX4/ROS2/Docker** setup using:
 
@@ -32,7 +32,7 @@ The final comparison shows that both approaches complete the corridor mission, w
 | Path | Purpose |
 |---|---|
 | `src/llm_agent.py` | Centralized controller and optional interactive LLM demo. |
-| `src/decentralized_agent.py` | Per-UAV local controllers for the decentralized baseline. |
+| `src/decentralized_agent.py` | Per-UAV local controllers for the decentralized consensus baseline. |
 | `src/experiment_runner.py` | Headless runner for centralized/decentralized corridor trials. |
 | `src/metrics.py` | Shared pass/fail and metric computation. |
 | `src/scenario.py` | Shared corridor, spawn, frame, and threshold constants. |
@@ -46,8 +46,8 @@ The final comparison shows that both approaches complete the corridor mission, w
 The experiment is a **known-map corridor** task:
 
 - Three UAVs start in line formation.
-- The leader flies through a corridor along positive `x`.
-- Followers maintain fixed offsets relative to the leader.
+- The shared mission plan moves the formation through a corridor along positive `x`.
+- Each UAV computes its assigned formation target from the current shared waypoint and its fixed offset.
 - Buildings are injected into Gazebo as two rows of obstacles with a gap around `y=0`.
 - Planning and evaluation use Gazebo ENU coordinates: `x` East, `y` North, `z` Up.
 - Cruise altitude is `z=+6 m`.
@@ -173,7 +173,7 @@ Final run:
 | Controller | Mission success | Mission time | Avg formation error | Max formation error | Failure reasons |
 |---|---:|---:|---:|---:|---|
 | Centralized | True | 8.02 s | 0.047 m | 0.123 m | none |
-| Decentralized | True | 12.08 s | 0.126 m | 0.260 m | none |
+| Decentralized consensus | True | 12.08 s | 0.126 m | 0.260 m | none |
 
 Both modes completed the same corridor mission without stale odometry, oscillation, or corridor violations.
 
@@ -182,7 +182,7 @@ Both modes completed the same corridor mission without stale odometry, oscillati
 Interpretation:
 
 - Centralized control is faster because one controller computes the global mission and all formation setpoints.
-- Decentralized control succeeds, but takes longer and has higher formation error because each UAV acts through local fixed-rule coordination.
+- Decentralized consensus control succeeds, but takes longer and has higher formation error because each UAV computes its own target and waits for peer readiness before advancing waypoints.
 - Both errors are well below the `2 m` success threshold.
 
 ## Trajectory And Safety Plots
@@ -268,6 +268,6 @@ Then compact Docker's VHDX from an Administrator `diskpart` session if needed.
 
 This project completes a reproducible comparison between centralized and decentralized multi-UAV coordination in the same simulated corridor. Both controllers successfully fly the three-UAV formation through the corridor, reach the final waypoint, and remain within the configured safety and formation-error thresholds.
 
-The results show the expected trade-off. The centralized controller performs better in this controlled known-map scenario because one node has global responsibility for the mission and all formation setpoints, producing faster completion and smaller formation error. The decentralized baseline is still successful, but it is slower and less precise because each UAV computes its own movement from local fixed rules.
+The results show the expected trade-off. The centralized controller performs better in this controlled known-map scenario because one node has global responsibility for the mission and all formation setpoints, producing faster completion and smaller formation error. The decentralized consensus baseline is still successful, but it is slower and less precise because each UAV computes its own movement from the shared plan and synchronizes waypoint progression through peer readiness messages.
 
 Overall, the project demonstrates a complete DevOps-style robotics workflow: containerized simulation, repeatable experiments, automated metric collection, pass/fail evaluation, and report-ready plots. The final outputs provide enough evidence to explain, reproduce, and compare both coordination approaches clearly.
