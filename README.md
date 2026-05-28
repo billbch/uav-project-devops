@@ -227,7 +227,14 @@ It contains:
 
 ## Optional Interactive LLM Demo
 
-The original interactive centralized agent is still available:
+This repo still includes the original **Groq LLM-powered interactive controller** (`src/llm_agent.py`). It lets you type a natural-language request (formation and/or mission), then uses Groq to generate **JSON** formation offsets and/or leader waypoints and flies the three UAVs in offboard mode.
+
+**Behavior you should expect (matches the script output):**
+
+- The UAVs switch to **offboard** and **arm automatically**, then hold **hover**.
+- They **only move when you start a mission** (menu option `2`, `3`, `5`, or `6`).
+
+Run it inside the `ros2_agent` container:
 
 ```bash
 docker exec -it ros2_agent bash
@@ -236,17 +243,40 @@ source /ros2_ws/install/setup.bash
 python3 /scripts/llm_agent.py
 ```
 
-Useful menu options:
+### Menu options (interactive)
 
-- `5`: fixed corridor mission without LLM
-- `6`: triangle formation plus corridor mission
-- `1` / `2` / `3`: LLM-assisted formation/mission generation if `GROQ_API_KEY` is configured
+The script prints a menu and waits for:
+
+```text
+opción (1/2/3/4/5/6/salir)>>> 
+```
+
+- `1`: **Define/update formation (offsets)** using the **LLM**. Prints the generated follower offsets and asks if you want to apply them. **Does not move** (UAVs stay in hover).
+- `2`: **Define mission (leader waypoints) and start flying** using the **LLM**. Prints how many leader waypoints were generated and asks if you want to start. Uses the current formation offsets.
+- `3`: **Define formation + mission and start flying** using the **LLM**. Prints offsets + waypoint count and asks if you want to start.
+- `4`: **Standby** (pause motion; hover).
+- `5`: **DEBUG corridor mission (no LLM)**: leader flies +X through the corridor gap (followers keep the current formation).
+- `6`: **One-step demo (no LLM)**: triangle formation + the same corridor mission.
+- `salir`: exit.
+
+### Groq API key
+
+Options `1`/`2`/`3` require `GROQ_API_KEY`. Set it only if you want the LLM path:
 
 Create `.env` only if using the LLM path:
 
 ```bash
 GROQ_API_KEY=your_key_here
 ```
+
+### What to capture for a presentation
+
+- **Non-LLM quick demo**: run option `6` to show “formation + corridor” working end-to-end without any API key.
+- **LLM demo** (needs `GROQ_API_KEY`): run option `3`, type a formation request (e.g. `triangulo`) and a mission request (e.g. “fly the corridor”), then show the printed output:
+  - “Generando plan con LLM…”
+  - formation name + follower offsets
+  - waypoint count
+  - confirmation prompt (`¿Empezar? (s/n)`)
 
 ## Cleanup
 

@@ -1,0 +1,308 @@
+\documentclass[a4paper,11pt]{article}
+
+%%% Packages from the course template %%%
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage[utf8]{inputenc}
+\usepackage{enumerate}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{paralist}
+\usepackage{dsfont}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{hyperref}
+\usepackage{mathtools}
+\usepackage{verbatim}
+\usepackage{xcolor}
+\usepackage{environ}
+\usepackage{float}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage[section]{placeins}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{tikz}
+\usepackage{array}
+\usepackage{url}
+\usepackage{needspace}
+
+%%% Additional commands from the template %%%
+\newcommand{\R}{\ensuremath{\mathds{R}}}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=blue
+}
+
+\title{Centralized vs Decentralized Consensus Multi-UAV Coordination in a Simulated Corridor}
+\date{Spring 2026}
+
+\begin{document}
+
+%%% TITLE PAGE %%%
+\begin{titlepage}
+\newgeometry{top=1.2cm,bottom=1.2cm,left=1.7cm,right=1.7cm}
+\pagestyle{empty}
+
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[gray!18] (current page.south west) rectangle (current page.north east);
+\end{tikzpicture}
+
+\vspace*{0.2cm}
+
+\begin{center}
+\begin{tabular}{>{\centering\arraybackslash}m{0.29\textwidth}
+                >{\centering\arraybackslash}m{0.29\textwidth}
+                >{\centering\arraybackslash}m{0.29\textwidth}}
+  \includegraphics[width=0.17\textwidth,keepaspectratio]{figures/unibe_logo.png} &
+  \includegraphics[width=0.20\textwidth,keepaspectratio]{figures/unifr_logo.png} &
+  \includegraphics[width=0.17\textwidth,keepaspectratio]{figures/unine_logo.png}
+\end{tabular}
+\end{center}
+
+\vspace*{4.1cm}
+
+\begin{center}
+{\Large Centralized vs Decentralized Consensus}\\[0.18cm]
+{\Large Multi-UAV Coordination in a Simulated Corridor}\\[0.75cm]
+
+{\large Project Report}\\[0.35cm]
+
+{\normalsize Agentic Multi-UAV Coordination}\\[0.18cm]
+{\itshape Gazebo / PX4 / ROS2 Benchmark}\\[0.95cm]
+
+{\large Mateo Lopez}\\[-0.02cm]
+{\normalsize \texttt{mateo.lopez@unine.ch}}\\[0.65cm]
+
+{\small Repository: \texttt{uav-project-devops}}
+\end{center}
+
+\vfill
+
+\noindent
+\begin{tabular}{@{}p{0.34\textwidth}p{0.62\textwidth}@{}}
+\textbf{Date:} & Spring 2026 \\[0.10cm]
+\textbf{Topic:} & Multi-UAV simulation, formation control, and architecture comparison \\
+\end{tabular}
+
+\restoregeometry
+\end{titlepage}
+
+\pagestyle{plain}
+\pagenumbering{arabic}
+
+\section*{Abstract}
+
+This report documents a reproducible comparison of two multi-UAV coordination architectures in the same known-map corridor scenario. Three PX4-powered vehicles fly in line formation through a Gazebo world with injected building obstacles. We evaluate a \emph{centralized} controller that computes mission waypoints and follower setpoints on one ROS2 node, and a \emph{decentralized consensus} baseline where each UAV runs a local controller, shares the same waypoint plan, and advances waypoints using peer readiness messages. Both architectures use the same Dockerized stack (Gazebo, three PX4 SITL instances, Micro XRCE-DDS, ROS2 Jazzy). Mission outcomes are scored with shared pass/fail rules on mission time, average and maximum formation error, corridor safety, and goal arrival. On the primary benchmark trials, both architectures complete the mission; centralized control is faster ($\approx 8\,\mathrm{s}$ vs.\ $\approx 12\,\mathrm{s}$) and keeps lower formation error. An additional decentralized trial from a repeated result copy fails corridor and formation thresholds, illustrating sensitivity to run quality. Figures are generated from logged \texttt{pose.csv} and \texttt{summary.json} files via \texttt{uav\_eval\_analysis.ipynb}.
+
+\section{Introduction}
+
+Coordinating multiple unmanned aerial vehicles (UAVs) requires choosing how much planning and control logic is centralized versus distributed across agents~\cite{beard2008uav}. A single coordinator can enforce tight formation and synchronized waypoint progress, but creates a single point of failure and heavier communication to all followers. A decentralized design can improve modularity and fault isolation at the cost of consensus latency and looser formation tracking.
+
+This project implements both approaches under identical simulation infrastructure~\cite{px42024,ros2jazzy2024} and compares them on a fixed corridor mission inspired by agentic multi-UAV coordination ideas~\cite{uavproject2026}. The corridor is a known-map task: no SLAM or onboard perception is added; buildings are placed deterministically in Gazebo and safety is checked against geometric corridor bounds.
+
+Our contributions are:
+\begin{enumerate}
+  \item A reproducible Docker Compose stack with three PX4 SITL UAVs, DDS bridges, and ROS2 control nodes.
+  \item A shared corridor scenario, formation offsets, and evaluation pipeline (\texttt{metrics.py}, \texttt{experiment\_runner.py}).
+  \item Logged trials for centralized and decentralized modes with CSV trajectories and JSON summaries.
+  \item Analysis notebook and report figures comparing mission time, formation error, paths, and leader altitude/lateral behavior.
+\end{enumerate}
+
+Section~2 defines the scenario, architectures, and metrics. Section~3 describes the experimental methodology. Section~4 presents quantitative results. Section~5 analyses trajectories and safety. Section~6 discusses trade-offs and limitations.
+
+\section{System, Scenario, and Metrics}
+
+\subsection{Simulation stack}
+
+Table~\ref{tab:stack} lists the main technologies. Gazebo renders the 3D world and vehicle models; each UAV runs PX4 in software-in-the-loop (SITL) mode; a Micro XRCE-DDS agent per vehicle bridges PX4 topics to ROS2; Python nodes implement control, logging, and evaluation.
+
+\begin{table}[H]
+  \centering
+  \small
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    Component & Role \\
+    \midrule
+    Docker Compose & Reproducible multi-container startup \\
+    Gazebo & World, obstacles, vehicle poses (ENU) \\
+    PX4 SITL & Offboard position control per UAV \\
+    Micro XRCE-DDS & PX4 $\leftrightarrow$ ROS2 messaging \\
+    ROS2 Jazzy & Control nodes, evaluation logger \\
+    Python & Centralized/decentralized agents, metrics, runner \\
+    \bottomrule
+  \end{tabularx}
+  \caption{Technology stack for the corridor benchmark.}
+  \label{tab:stack}
+\end{table}
+
+\subsection{Corridor scenario}
+
+Planning uses Gazebo ENU coordinates ($x$ East, $y$ North, $z$ Up). Three UAVs spawn in line formation at $z = 6\,\mathrm{m}$ with followers offset by $+2\,\mathrm{m}$ and $+4\,\mathrm{m}$ along $x$. The leader follows seven corridor waypoints from $x=4\,\mathrm{m}$ to $x=40\,\mathrm{m}$ on the centerline $y=0$. Six $6\times6\times12\,\mathrm{m}$ building footprints create two obstacle rows with a navigable gap around $y=0$.
+
+Inside the corridor segment ($x \in [8,40]\,\mathrm{m}$), every UAV must satisfy $|y| \le 2.8\,\mathrm{m}$ and $z \in [0.5, 11.5]\,\mathrm{m}$. PX4 local NED odometry is converted to the shared ENU frame using per-vehicle spawn origins (\texttt{scenario.py}).
+
+\subsection{Control architectures}
+
+\paragraph{Centralized.}
+One \texttt{FormationNode} (\texttt{llm\_agent.py}) owns the waypoint progressor and computes leader and follower trajectory setpoints for all three PX4 namespaces. Follower targets are leader position plus fixed line offsets (\texttt{formation\_flight.py}). An optional Groq LLM path exists for interactive missions; benchmark runs use \texttt{--no-llm}.
+
+\paragraph{Decentralized consensus.}
+Three \texttt{LocalUavController} nodes (\texttt{decentralized\_agent.py}) run in parallel. UAV~0 tracks the shared corridor waypoints after takeoff/settle. UAVs~1 and~2 track UAV~0 with the same fixed offsets. Waypoint indices advance only when peers publish readiness on a shared ROS topic, approximating a lightweight consensus step before progressing.
+
+\subsection{Evaluation metrics}
+
+The headless runner (\texttt{experiment\_runner.py}) logs pose samples at $2\,\mathrm{Hz}$ to \texttt{pose.csv} and then calls \texttt{analyze\_pose\_csv}. A trial \textbf{succeeds} only if all of the following hold over the evaluated motion window:
+\begin{itemize}
+  \item Leader reaches the final waypoint within $2.5\,\mathrm{m}$ with valid formation.
+  \item No corridor safety violation for any UAV.
+  \item Maximum follower formation error $\le 2.0\,\mathrm{m}$.
+  \item No stale odometry ($> 2\,\mathrm{s}$ gap) or detected lateral oscillation.
+\end{itemize}
+
+Reported quantities:
+\begin{itemize}
+  \item \textbf{Mission time} --- elapsed seconds from first waypoint advance to successful goal with valid formation.
+  \item \textbf{Average formation error} --- mean $\ell_2$ distance between each follower's actual position and its nominal offset from the leader.
+  \item \textbf{Maximum formation error} --- worst follower offset in the evaluated window.
+\end{itemize}
+
+\needspace{4\baselineskip}
+\section{Experimental Methodology}
+
+Each architecture is run in a fresh stack after \texttt{docker compose} restart to avoid cross-trial state. Commands are executed inside the \texttt{ros2\_agent} container:
+
+\begin{verbatim}
+python3 /scripts/experiment_runner.py \
+  --mode {centralized|decentralized} \
+  --scenario corridor \
+  --log-dir /tmp/uav_eval/<mode> \
+  --no-llm
+\end{verbatim}
+
+Results are copied from container \texttt{/tmp} to host \texttt{uav\_eval/<mode>/}. The analysis notebook \texttt{uav\_eval\_analysis.ipynb} discovers every folder under \texttt{uav\_eval/<mode>/} that contains both \texttt{summary.json} and \texttt{pose.csv}. Top-level folders are labelled \textbf{Trial~1}; nested folders from repeated \texttt{docker cp} operations are \textbf{Trial~2}, etc.
+
+Table~\ref{tab:settings} summarises the logged trials used in this report.
+
+\begin{table}[H]
+  \centering
+  \scriptsize
+  \setlength{\tabcolsep}{4pt}
+  \renewcommand{\arraystretch}{0.9}
+  \begin{tabularx}{\textwidth}{p{0.22\textwidth}X p{0.16\textwidth}}
+    \toprule
+    Trial & Host path & Role \\
+    \midrule
+    Centralized Trial 1 & \texttt{uav\_eval/centralized/} & Primary centralized benchmark \\
+    Centralized Trial 2 & \texttt{uav\_eval/centralized/centralized/} & Repeated centralized copy \\
+    Decentralized Trial 1 & \texttt{uav\_eval/decentralized/} & Primary decentralized benchmark \\
+    Decentralized Trial 2 & \texttt{uav\_eval/decentralized/decentralized/} & Repeated decentralized copy (failed) \\
+    \bottomrule
+  \end{tabularx}
+  \caption{Recorded trials under \texttt{uav\_eval/}. Trial~1 folders are the intended headline comparison.}
+  \label{tab:settings}
+\end{table}
+
+\FloatBarrier
+\section{Quantitative Results}
+
+Table~\ref{tab:results} lists mission outcomes from \texttt{summary.json}. The primary comparison is \textbf{Centralized Trial~1} versus \textbf{Decentralized Trial~1}: both pass, but centralized finishes in $8.02\,\mathrm{s}$ with average formation error $0.047\,\mathrm{m}$ and maximum $0.123\,\mathrm{m}$, whereas decentralized needs $12.08\,\mathrm{s}$ with average $0.126\,\mathrm{m}$ and maximum $0.260\,\mathrm{m}$ --- roughly $1.5\times$ longer and $2.7\times$ higher mean formation error.
+
+\begin{table}[H]
+  \centering
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lccrrl}
+    \toprule
+    Trial & Success & Time (s) & Avg err (m) & Max err (m) & Failure reasons \\
+    \midrule
+    Centralized 1 & Yes & 8.02 & 0.047 & 0.123 & --- \\
+    Centralized 2 & Yes & 8.27 & 0.060 & 0.268 & --- \\
+    Decentralized 1 & Yes & 12.08 & 0.126 & 0.260 & --- \\
+    Decentralized 2 & No & --- & 1.006 & 2.929 & goal, corridor, formation \\
+    \bottomrule
+  \end{tabular}
+  \caption{Summary metrics for all discovered trials. Mission time is omitted when the run does not reach success.}
+  \label{tab:results}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{figures/metric_comparison.png}
+  \caption{Grouped comparison of mission time, average formation error, and maximum formation error by trial. Blue bars: centralized; orange bars: decentralized. The dashed line marks the $2\,\mathrm{m}$ formation threshold.}
+  \label{fig:metrics}
+\end{figure}
+
+Figure~\ref{fig:metrics} visualises Table~\ref{tab:results}. Trial~2 bars illustrate repeatability: centralized Trial~2 remains successful with slightly higher errors; decentralized Trial~2 shows no valid mission time and exceeds the $2\,\mathrm{m}$ max-formation limit, consistent with failure flags in its JSON log.
+
+\FloatBarrier
+\section{Trajectory and Safety Analysis}
+
+Figures~\ref{fig:xy}--\ref{fig:alt} are exported from \texttt{uav\_eval\_analysis.ipynb} and copied to \texttt{report/figures/} for self-contained compilation.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/xy_paths.png}
+  \caption{Top-down $(x,y)$ trajectories by trial (rows) and architecture (columns). Gray blocks are obstacles; dashed lines mark corridor guides. Successful trials stay in the gap; Decentralized Trial~2 drifts toward unsafe regions.}
+  \label{fig:xy}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/formation_error.png}
+  \caption{Follower formation error over time. The $2\,\mathrm{m}$ threshold is shown dashed. Decentralized Trial~2 exceeds the limit, matching its failed summary.}
+  \label{fig:formation}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/altitude_lateral.png}
+  \caption{Leader lateral deviation ($y$) and altitude ($z$) for Trial~1 and Trial~2. Cruise altitude target is $z=6\,\mathrm{m}$ (dashed).}
+  \label{fig:alt}
+\end{figure}
+
+\paragraph{Path completion.}
+The XY grid (Figure~\ref{fig:xy}) shows that primary trials for both architectures traverse the corridor gap and reach the eastern exit. Failed decentralized Trial~2 exhibits lateral excursions inconsistent with the safe envelope.
+
+\paragraph{Formation tracking.}
+Figure~\ref{fig:formation} confirms that successful trials keep both followers well below the $2\,\mathrm{m}$ cap throughout motion. Decentralized Trial~1 shows moderately higher error than centralized Trial~1, aligning with the summary table.
+
+\paragraph{Leader safety.}
+Figure~\ref{fig:alt} shows leaders near $z=6\,\mathrm{m}$ after settle. Centralized trials keep lateral $|y|$ smaller; decentralized Trial~1 shows slightly more lateral motion while still passing corridor checks.
+
+\FloatBarrier
+\section{Discussion}
+
+\paragraph{Centralized advantage on this benchmark.}
+With a known map and fixed offsets, a single coordinator removes inter-agent waypoint disagreement. Follower setpoints are recomputed every control tick from the leader pose, which explains lower formation error and shorter mission time in Trial~1.
+
+\paragraph{Decentralized trade-offs.}
+The consensus baseline completes the primary mission but pays a time penalty waiting for peer readiness and tolerates larger follower offsets. It demonstrates that distributed logic can finish the route under the same thresholds, yet with reduced precision in this SITL setup.
+
+\paragraph{Failed repeat trial.}
+Decentralized Trial~2 is not a separate algorithm; it is an additional logged folder. Its failure (corridor violation, goal not reached with valid formation, max error $> 2\,\mathrm{m}$) highlights that decentralized runs can be less robust to startup/timing variation unless experiments are repeated and filtered.
+
+\paragraph{Optional LLM path.}
+\texttt{llm\_agent.py} retains an interactive Groq-backed mission/formation generator for demonstrations. It is intentionally disabled in benchmark runs (\texttt{--no-llm}) so comparisons isolate architecture, not LLM variability.
+
+\section{Reproducibility and Limitations}
+
+\paragraph{Reproducibility.}
+The workflow is fully scripted: \texttt{docker compose build/up}, \texttt{experiment\_runner.py}, host copy of \texttt{uav\_eval/}, and notebook regeneration of figures. Thresholds and scenario constants live in \texttt{scenario.py} and \texttt{metrics.py}.
+
+\paragraph{Limitations.}
+\begin{itemize}
+  \item \textbf{Simulation only} --- No hardware flights, wind, or communication dropouts beyond DDS defaults.
+  \item \textbf{Known map} --- Obstacle layout is injected offline; no perception or SLAM.
+  \item \textbf{Small sample} --- Report uses four logged folders (two per mode), not a large statistical study.
+  \item \textbf{Trial~2 folders} --- Nested copies come from manual \texttt{docker cp}; they are real logs but not independent algorithm variants.
+\end{itemize}
+
+\paragraph{Conclusion.}
+Under identical Gazebo/PX4/ROS2 conditions, centralized coordination completes the corridor faster and with tighter formation than the decentralized consensus baseline on the primary trials. Both architectures can satisfy the configured pass criteria; decentralized control remains viable but less precise here, and repeat logs show that failed runs are detectable via the shared metric pipeline. Future work could add stochastic repeats, communication latency, or LLM-generated missions evaluated with the same \texttt{metrics.py} rules.
+
+\bibliographystyle{alpha}
+\bibliography{references}
+
+\end{document}
