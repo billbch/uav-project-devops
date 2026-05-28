@@ -218,7 +218,18 @@ It contains:
 
 ## Optional Interactive LLM Demo
 
-The original interactive centralized agent is still available:
+The project also includes an optional interactive demo in `src/llm_agent.py`.
+
+This part is separate from the reproducible centralized vs decentralized benchmark. It is used to show that the system can also accept natural language instructions and convert them into formation or mission plans through Groq.
+
+In this demo, the LLM is only used for high level planning:
+* formation offsets for the followers
+* leader waypoints for the mission
+* or both together
+
+The actual UAV motion is still executed through the same ROS2 → PX4 → Gazebo control pipeline.
+
+Run the interactive demo with:
 
 ```bash
 docker exec -it ros2_agent bash
@@ -229,40 +240,43 @@ python3 /scripts/llm_agent.py
 
 Useful menu options:
 
-- `5`: fixed corridor mission without LLM
-- `6`: triangle formation plus corridor mission
-- `1` / `2` / `3`: LLM-assisted formation/mission generation if `GROQ_API_KEY` is configured
+* `1`: define or update only the formation using the LLM
+* `2`: define a mission and start flying using the current formation
+* `3`: define both formation and mission with the LLM and start flying
+* `4`: standby mode, where the UAVs hold position
+* `5`: fixed corridor mission without LLM
+* `6`: fixed triangle formation plus corridor mission without LLM
 
-Create `.env` only if using the LLM path:
+### Example LLM Inputs And Outputs
 
-```bash
-GROQ_API_KEY=your_key_here
-```
+Typical natural language inputs are simple prompts such as:
 
-## Cleanup
+* formation: `triangulo`
+* mission: `fly the corridor`
 
-After saving results:
+From these prompts, Groq generates structured outputs that are converted into:
 
-```bash
-docker compose down --remove-orphans
-docker container prune -f
-docker builder prune -f
-```
+* follower offsets
+* leader waypoints
 
-More aggressive cleanup if disk is full:
+In practice:
 
-```bash
-docker system prune -af --volumes
-docker builder prune -af
-```
+* Option `1` updates only the follower offsets and keeps the UAVs hovering
+* Option `2` generates waypoints and starts the mission with the current offsets
+* Option `3` generates both the formation and the mission, then asks for confirmation before flight starts
 
-On Windows, reclaim WSL/Docker disk space after cleanup:
+### What This Demo Shows
 
-```powershell
-wsl --shutdown
-```
+This demo is useful for presentations because it shows that the system can:
 
-Then compact Docker's VHDX from an Administrator `diskpart` session if needed.
+* receive natural language input
+* generate a valid formation or mission plan
+* validate the generated plan
+* execute it through the same ROS2, PX4, and Gazebo stack
+
+### Important Note
+
+The Groq LLM path is optional and is not part of the final reproducible comparison. The main benchmark uses fixed corridor missions with `--no-llm` so that centralized and decentralized control can be compared fairly under the same conditions.
 
 ## Project Conclusion
 
